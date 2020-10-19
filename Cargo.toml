@@ -1,0 +1,7 @@
+[package]
+name = "spectrogram"
+version = "0.1.0"
+authors = ["Vladimir Ivanov <ivvl82@gmail.com>"]
+
+[dependencies]
+sdl2 = "^0.34"
