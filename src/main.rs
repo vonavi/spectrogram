@@ -7,6 +7,7 @@ use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::{BlendMode, Canvas, Texture};
 use sdl2::video::Window;
+use sdl2::Sdl;
 use std::cmp;
 
 static WINDOW_WIDTH: u32 = 640;
@@ -19,49 +20,65 @@ struct Region {
     y1: i32,
 }
 
-fn region_to_rect(region: &Region) -> Rect {
-    let left = cmp::min(region.x0, region.x1);
-    let top = cmp::min(region.y0, region.y1);
-    let width = (cmp::max(region.x0, region.x1) - left) as u32;
-    let height = (cmp::max(region.y0, region.y1) - top) as u32;
-    return Rect::new(left, top, width, height);
+struct Interface {
+    canvas: Canvas<Window>,
 }
 
-fn window_select(region: &Region, canvas: &mut Canvas<Window>, texture: &Texture) {
-    canvas.clear();
-    canvas.copy(texture, None, None).unwrap();
-    canvas.set_draw_color(Color::RGBA(0, 102, 204, 200));
-    canvas.fill_rect(region_to_rect(region)).unwrap();
-    canvas.present();
-}
+impl Interface {
+    fn init(sdl_context: &Sdl) -> Result<Interface, String> {
+        let video_subsystem = sdl_context.video().unwrap();
+        let window = video_subsystem
+            .window("spectrogram", WINDOW_WIDTH, WINDOW_HEIGHT)
+            .build()
+            .map_err(|e| e.to_string())?;
+        let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
+        canvas.set_blend_mode(BlendMode::Add);
 
-fn window_zoom_in(region: &Region, canvas: &mut Canvas<Window>, texture: &Texture) {
-    canvas.clear();
-    canvas
-        .copy(texture, Some(region_to_rect(region)), None)
-        .unwrap();
-    canvas.present();
-}
+        Ok(Interface { canvas })
+    }
 
-fn window_zoom_out(canvas: &mut Canvas<Window>, texture: &Texture) -> () {
-    canvas.clear();
-    canvas.copy(texture, None, None).unwrap();
-    canvas.present();
+    fn get_canvas(&self) -> &Canvas<Window> {
+        &self.canvas
+    }
+
+    fn select(&mut self, texture: &Texture, region: &Region) {
+        self.canvas.clear();
+        self.canvas.copy(texture, None, None).unwrap();
+        self.canvas.set_draw_color(Color::RGBA(0, 102, 204, 200));
+        self.canvas
+            .fill_rect(Interface::region_to_rect(region))
+            .unwrap();
+        self.canvas.present();
+    }
+
+    fn zoom_in(&mut self, texture: &Texture, region: &Region) {
+        self.canvas.clear();
+        self.canvas
+            .copy(texture, Some(Interface::region_to_rect(region)), None)
+            .unwrap();
+        self.canvas.present();
+    }
+
+    fn zoom_out(&mut self, texture: &Texture) -> () {
+        self.canvas.clear();
+        self.canvas.copy(texture, None, None).unwrap();
+        self.canvas.present();
+    }
+
+    fn region_to_rect(region: &Region) -> Rect {
+        let left = cmp::min(region.x0, region.x1);
+        let top = cmp::min(region.y0, region.y1);
+        let width = (cmp::max(region.x0, region.x1) - left) as u32;
+        let height = (cmp::max(region.y0, region.y1) - top) as u32;
+        return Rect::new(left, top, width, height);
+    }
 }
 
 pub fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
-    let video_subsystem = sdl_context.video()?;
+    let mut interface = Interface::init(&sdl_context)?;
 
-    let window = video_subsystem
-        .window("spectrogram", WINDOW_WIDTH, WINDOW_HEIGHT)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
-    canvas.set_blend_mode(BlendMode::Add);
-
-    let creator = canvas.texture_creator();
+    let creator = interface.get_canvas().texture_creator();
     let mut texture = creator
         .create_texture_streaming(PixelFormatEnum::IYUV, WINDOW_WIDTH, WINDOW_HEIGHT)
         .map_err(|e| e.to_string())?;
@@ -94,9 +111,7 @@ pub fn main() -> Result<(), String> {
         }
     })?;
 
-    // canvas.clear();
-    canvas.copy(&texture, None, None)?;
-    canvas.present();
+    interface.zoom_out(&texture);
 
     let mut region = Region {
         x0: 0,
@@ -115,7 +130,7 @@ pub fn main() -> Result<(), String> {
                     Some(Keycode::Escape) => break 'running,
                     Some(Keycode::Num0) => {
                         if keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD) {
-                            window_zoom_out(&mut canvas, &texture);
+                            interface.zoom_out(&texture);
                         }
                     }
                     _ => {}
@@ -126,7 +141,7 @@ pub fn main() -> Result<(), String> {
                     if mousestate.left() {
                         region.x1 = x;
                         region.y1 = y;
-                        window_select(&region, &mut canvas, &texture);
+                        interface.select(&texture, &region);
                     }
                 }
                 Event::MouseButtonDown {
@@ -143,7 +158,7 @@ pub fn main() -> Result<(), String> {
                     if mouse_btn == MouseButton::Left {
                         region.x1 = x;
                         region.y1 = y;
-                        window_zoom_in(&region, &mut canvas, &texture);
+                        interface.zoom_in(&texture, &region);
                     }
                 }
                 _ => {}
