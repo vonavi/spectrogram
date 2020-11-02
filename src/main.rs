@@ -22,6 +22,8 @@ struct Region {
 
 struct Interface {
     canvas: Canvas<Window>,
+    selection: Option<Region>,
+    cropping: Option<Region>,
 }
 
 impl Interface {
@@ -34,35 +36,50 @@ impl Interface {
         let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
         canvas.set_blend_mode(BlendMode::Add);
 
-        Ok(Interface { canvas })
+        Ok(Interface {
+            canvas,
+            selection: None,
+            cropping: None,
+        })
     }
 
     fn get_canvas(&self) -> &Canvas<Window> {
         &self.canvas
     }
 
-    fn select(&mut self, texture: &Texture, region: &Region) {
-        self.canvas.clear();
-        self.canvas.copy(texture, None, None).unwrap();
-        self.canvas.set_draw_color(Color::RGBA(0, 102, 204, 200));
-        self.canvas
-            .fill_rect(Interface::region_to_rect(region))
-            .unwrap();
-        self.canvas.present();
+    fn sel_modify(&mut self, x: i32, y: i32) {
+        self.selection = match &self.selection {
+            Some(reg) => Some(Region {
+                x1: x,
+                y1: y,
+                ..*reg
+            }),
+            None => Some(Region {
+                x0: x,
+                y0: y,
+                x1: x,
+                y1: y,
+            }),
+        };
+        self.cropping = None;
     }
 
-    fn zoom_in(&mut self, texture: &Texture, region: &Region) {
-        self.canvas.clear();
-        self.canvas
-            .copy(texture, Some(Interface::region_to_rect(region)), None)
-            .unwrap();
-        self.canvas.present();
+    fn sel_mkcrop(&mut self) {
+        self.cropping = self.selection.take();
     }
 
-    fn zoom_out(&mut self, texture: &Texture) -> () {
+    fn update(&mut self, texture: &Texture) -> Result<(), String> {
         self.canvas.clear();
-        self.canvas.copy(texture, None, None).unwrap();
+        let crop = (&self.cropping)
+            .as_ref()
+            .map(|r| Interface::region_to_rect(r));
+        self.canvas.copy(texture, crop, None)?;
+        for reg in self.selection.iter() {
+            self.canvas.set_draw_color(Color::RGBA(0, 102, 204, 200));
+            self.canvas.fill_rect(Interface::region_to_rect(reg))?;
+        }
         self.canvas.present();
+        Ok(())
     }
 
     fn region_to_rect(region: &Region) -> Rect {
@@ -111,14 +128,6 @@ pub fn main() -> Result<(), String> {
         }
     })?;
 
-    interface.zoom_out(&texture);
-
-    let mut region = Region {
-        x0: 0,
-        y0: 0,
-        x1: WINDOW_WIDTH as i32,
-        y1: WINDOW_HEIGHT as i32,
-    };
     let mut events = sdl_context.event_pump()?;
     'running: loop {
         for event in events.poll_iter() {
@@ -130,7 +139,7 @@ pub fn main() -> Result<(), String> {
                     Some(Keycode::Escape) => break 'running,
                     Some(Keycode::Num0) => {
                         if keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD) {
-                            interface.zoom_out(&texture);
+                            interface.sel_mkcrop();
                         }
                     }
                     _ => {}
@@ -139,31 +148,29 @@ pub fn main() -> Result<(), String> {
                     x, y, mousestate, ..
                 } => {
                     if mousestate.left() {
-                        region.x1 = x;
-                        region.y1 = y;
-                        interface.select(&texture, &region);
+                        interface.sel_modify(x, y);
                     }
                 }
                 Event::MouseButtonDown {
                     x, y, mouse_btn, ..
                 } => {
                     if mouse_btn == MouseButton::Left {
-                        region.x0 = x;
-                        region.y0 = y;
+                        interface.sel_modify(x, y);
                     }
                 }
                 Event::MouseButtonUp {
                     x, y, mouse_btn, ..
                 } => {
                     if mouse_btn == MouseButton::Left {
-                        region.x1 = x;
-                        region.y1 = y;
-                        interface.zoom_in(&texture, &region);
+                        interface.sel_modify(x, y);
+                        interface.sel_mkcrop();
                     }
                 }
                 _ => {}
             }
         }
+
+        interface.update(&texture)?;
     }
 
     Ok(())
